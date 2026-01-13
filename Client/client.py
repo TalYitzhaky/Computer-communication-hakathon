@@ -81,43 +81,74 @@ class BlackjackClient:
         has_stood = False
         player_sum = 0
         cards_received = 0
-        
+
         while True:
             data = self.recv_all(sock, PAYLOAD_SIZE)
-            if not data: return False
-            
-            cookie, msg_type, _, result, rank, suit = struct.unpack(PAYLOAD_FORMAT, data)
-            
-            # If rank is 0, this is the final result packet
+            if not data:
+                return False  # Server closed connection
+
+            cookie, msg_type, _, result, rank, suit = struct.unpack(
+                PAYLOAD_FORMAT, data
+            )
+
+            # =====================
+            # END OF ROUND PACKET
+            # =====================
             if rank == 0:
                 res_map = {0x1: "TIE", 0x2: "LOSS", 0x3: "WIN"}
                 print(f"--- Round Result: {res_map.get(result, '???')} ---")
-                if result == 0x3: self.wins += 1
-                return True # Now we can safely exit to Round 4
-            
-            # Otherwise, it's a card
+
+                if result == 0x3:
+                    self.wins += 1
+
+                return True  # Round finished cleanly
+
+            # =====================
+            # CARD RECEIVED
+            # =====================
             cards_received += 1
+
             r_name = RANKS.get(rank, str(rank))
             s_name = SUITS.get(suit, "")
-            
+
+            # Player cards: first 2 cards and any hits BEFORE standing
             if not has_stood and cards_received != 3:
-                player_sum += rank if rank < 10 else 10
+                card_value = rank if rank < 10 else 10
+                player_sum += card_value
                 print(f"Card dealt: {r_name}{s_name} (Total: {player_sum})")
             else:
                 print(f"Dealer dealt: {r_name}{s_name}")
 
-            # Decision Logic: Only if we haven't stood and haven't busted
+            # =====================
+            # PLAYER DECISION
+            # =====================
+            # Only decide AFTER initial deal (3 cards)
+            # Only if player hasn't stood or busted
             if cards_received >= 3 and not has_stood:
+
+                # Player busted or hit 21 → stop sending decisions
                 if player_sum >= 21:
                     has_stood = True
-                    # We don't return! We wait for rank == 0
                     continue
 
                 choice = input("Your turn - (h)it or (s)tand? ").lower()
-                decision = b"Hittt" if choice == 'h' else b"Stand"
-                if choice == 's': has_stood = True
-                
-                sock.sendall(struct.pack(PAYLOAD_FORMAT, MAGIC_COOKIE, 0x4, decision, 0, 0, 0))
+
+                if choice == 'h':
+                    decision = b"Hittt"
+                else:
+                    decision = b"Stand"
+                    has_stood = True
+
+                sock.sendall(
+                    struct.pack(
+                        PAYLOAD_FORMAT,
+                        MAGIC_COOKIE,
+                        0x4,          # PAYLOAD
+                        decision,
+                        0, 0, 0
+                    )
+                )
+
 
     def recv_all(self, sock, n):
         data = b''
