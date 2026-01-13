@@ -58,64 +58,104 @@ class Server:
 
     # Handle one client
     def handle_client(self, sock: socket.socket):
+        client_name = "Unknown"
         try:
+            sock.settimeout(None) # Wait forever for human input
             data = sock.recv(Protocol.REQUEST_SIZE)
+            if not data: return
+            
             request = Protocol.parse_request_packet(data)
-
-            rounds = request["rounds"]
+            num_rounds = request["rounds"]
             client_name = request["client_name"]
+            
+            print(f"Starting {num_rounds} rounds with {client_name}")
 
-            print(f"{client_name} requested {rounds} rounds")
-
-            for _ in range(rounds):
+            for _ in range(num_rounds):
                 self.play_round(sock)
+                # Brief pause between rounds to let the TCP buffer clear
+                time.sleep(0.1)
 
+            # --- THE FIX ---
+            # Give the client a full second to receive and print the final 
+            # Round 5 result before we destroy the socket object.
+            print(f"Finished rounds for {client_name}. Cleaning up...")
+            time.sleep(1.5) 
+
+        except (ConnectionResetError, BrokenPipeError):
+            print(f"Client {client_name} disconnected abruptly.")
         except Exception as e:
-            print("Client error:", e)
-
+            print(f"Error handling {client_name}: {e}")
         finally:
+            try:
+                # Tell the client we are done sending, but stay open for a moment
+                sock.shutdown(socket.SHUT_RDWR)
+            except:
+                pass
             sock.close()
-            print("Client disconnected")
+            print(f"Socket for {client_name} closed safely.")
 
     # Play one round
     def play_round(self, sock: socket.socket):
+        sock.settimeout(None) 
         game = BlackjackRound()
-        print("Dealing initial cards")
         game.initial_deal()
+        
+        # 1. Initial 3 cards
+        for c in [game.player_hand.cards[0], game.player_hand.cards[1], game.dealer_hand.cards[0]]:
+            sock.sendall(Protocol.build_payload_packet(b"\x00"*5, Protocol.ROUND_NOT_OVER, c.rank, c.suit))
 
-        # Player turn
+        # 2. Player Turn
         while not game.finished:
             data = sock.recv(Protocol.PAYLOAD_SIZE)
+            if not data:
+                return
+
             payload = Protocol.parse_payload_packet(data)
 
-            decision = payload["decision"]
-
-            if decision == Protocol.HIT:
-                card = game.player_hit()
-                print(f"Player hits: {card}")
-                response = Protocol.build_payload_packet(
-                    decision=b"\x00" * 5,
-                    result=Protocol.ROUND_NOT_OVER,
-                    rank=card.rank,
-                    suit=card.suit
+            if payload["decision"] == "Hittt":
+                game.player_hit()
+                c = game.player_hand.cards[-1]
+                sock.sendall(
+                    Protocol.build_payload_packet(b"\x00"*5, Protocol.ROUND_NOT_OVER, c.rank, c.suit)
                 )
-                sock.sendall(response)
 
-            elif decision == Protocol.STAND:
+                if game.player_hand.is_bust():
+                    break
+
+            else:
                 game.player_stand()
-                print("Player stands")
                 break
-            
-        print(f"Dealer hand: {game.dealer_hand}")
-        print(f"Round result: {game.result()}")
 
-        # Send final result
+            try:
+                data = sock.recv(Protocol.PAYLOAD_SIZE)
+                if not data: return
+                payload = Protocol.parse_payload_packet(data)
+                
+                if payload["decision"] == "Hittt":
+                    game.player_hit()
+                    # We ONLY send the card here. We don't send the result yet.
+                    c = game.player_hand.cards[-1]
+                    sock.sendall(Protocol.build_payload_packet(b"\x00"*5, Protocol.ROUND_NOT_OVER, c.rank, c.suit))
+                else: 
+                    game.player_stand()
+                    break
+            except:
+                return
+        
+        # 3. Dealer Reveal (Crucial: Always send these!)
+        # Send the hidden card and any hits the dealer took
+        for i in range(1, len(game.dealer_hand.cards)):
+            c = game.dealer_hand.cards[i]
+            sock.sendall(
+                Protocol.build_payload_packet(b"\x00"*5, Protocol.ROUND_NOT_OVER, c.rank, c.suit)
+            )
+
+        # 4. Final Result (Rank 0, Suit 0)
+        # This is the "End of Round" signal the client is waiting for
         result_code = Protocol.result_to_code(game.result())
-        final_packet = Protocol.build_payload_packet(
-            decision=b"\x00" * 5,
-            result=result_code
+        sock.sendall(
+            Protocol.build_payload_packet(b"\x00"*5, result_code, 0, 0)
         )
-        sock.sendall(final_packet)
 
     # Run server
     def run(self):

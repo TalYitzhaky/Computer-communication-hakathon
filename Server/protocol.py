@@ -157,12 +157,12 @@ class Protocol:
             "suit": suit
         }
         
-        @staticmethod
-        def result_to_code(result: str) -> int:
-            if result == "win":
-                return Protocol.WIN
-            if result == "loss":
-                return Protocol.LOSS
-            if result == "tie":
-                return Protocol.TIE
-            return Protocol.ROUND_NOT_OVER
+    @staticmethod
+    def result_to_code(result: str) -> int:
+        if result == "win":
+            return Protocol.WIN
+        if result == "loss":
+            return Protocol.LOSS
+        if result == "tie":
+            return Protocol.TIE
+        return Protocol.ROUND_NOT_OVER
