@@ -16,27 +16,33 @@ class Server:
 
     def start_udp_broadcast(self):
         def broadcast_loop():
+            # Create UDP socket
             sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+            
+            # Explicitly bind to the real IP to force it out of the WiFi/Ethernet card
+            real_ip = self.get_real_ip()
+            try:
+                # We bind to port 0 (let OS choose) on the real IP
+                sock.bind((real_ip, 0))
+            except:
+                pass
 
-            print("Server started, sending offers...")
+            print(f"UDP Broadcast started from {real_ip} to 255.255.255.255:{self.UDP_PORT}")
 
             while self.running:
-                offer = Protocol.build_offer_packet(
-                    self.tcp_port,
-                    self.server_name
-                )
-                sock.sendto(offer, ('<broadcast>', self.UDP_PORT))
+                offer = Protocol.build_offer_packet(self.tcp_port, self.server_name)
+                # 255.255.255.255 is the standard global broadcast
+                sock.sendto(offer, ('255.255.255.255', self.UDP_PORT))
                 time.sleep(self.BROADCAST_INTERVAL)
 
-        threading.Thread(target=broadcast_loop, daemon=True).start()
-
     def start_tcp_server(self):
-        ip = socket.gethostbyname(socket.gethostname())
+        ip = self.get_real_ip()
 
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        sock.bind(('', self.tcp_port))
+        sock.bind(('0.0.0.0', self.tcp_port))
         sock.listen()
         sock.settimeout(1)
         print(f"Server started, listening on IP address {ip} and port {self.tcp_port}")
@@ -157,10 +163,21 @@ class Server:
     def run(self):
         self.start_udp_broadcast()
         self.start_tcp_server()
+    def get_real_ip(self):
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            # This doesn't actually connect, but tells us which IP the OS uses for the internet
+            s.connect(('8.8.8.8', 1))
+            IP = s.getsockname()[0]
+        except Exception:
+            IP = '127.0.0.1'
+        finally:
+            s.close()
+        return IP
 
 
 if __name__ == "__main__":
-    server = Server(server_name="Team Tal", tcp_port=5000)
+    server = Server(server_name="Team Testies", tcp_port=5000)
     try:
         server.run()
     except KeyboardInterrupt:

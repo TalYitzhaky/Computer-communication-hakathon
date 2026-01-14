@@ -11,7 +11,7 @@ RANKS = {1: 'A', 11: 'J', 12: 'Q', 13: 'K'}
 SUITS = {0: 'H', 1: 'D', 2: 'C', 3: 'S'}
 
 class BlackjackClient:
-    def __init__(self, team_name="Team Joker"):
+    def __init__(self, team_name="Team Testies"):
         self.team_name = team_name
         self.wins = 0
 
@@ -26,16 +26,32 @@ class BlackjackClient:
                 time.sleep(1)
 
     def listen_for_offer(self):
+        # We use AF_INET and SOCK_DGRAM for UDP
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
             s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            s.bind(('', 13117)) 
+            # On some Windows versions, SO_BROADCAST is needed even to receive
+            try:
+                s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+            except:
+                pass
+            
+            # Binding to '0.0.0.0' or '' listens on ALL interfaces
+            s.bind(('0.0.0.0', 13117)) 
+            
             while True:
-                data, addr = s.recvfrom(1024)
-                if len(data) >= 39:
-                    cookie, msg_type, port, name = struct.unpack("!IBH32s", data[:39])
-                    if cookie == MAGIC_COOKIE and msg_type == 0x2:
-                        print(f"Received offer from {addr[0]}")
-                        return addr[0], port
+                # Set a timeout so we can see if it's actually looping
+                s.settimeout(2.0)
+                try:
+                    data, addr = s.recvfrom(1024)
+                    print(f"DEBUG: Received {len(data)} bytes from {addr}")
+                    
+                    if len(data) >= 39:
+                        cookie, msg_type, port, name = struct.unpack("!IBH32s", data[:39])
+                        if cookie == MAGIC_COOKIE and msg_type == 0x2:
+                            print(f"Received offer from {addr[0]}")
+                            return addr[0], port
+                except socket.timeout:
+                    print("Still waiting for server offer...")
 
     def play_game(self, ip, port):
         tcp_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -145,5 +161,5 @@ class BlackjackClient:
         return data
 
 if __name__ == "__main__":
-    client = BlackjackClient(team_name="AceSpades")
+    client = BlackjackClient(team_name="Testies")
     client.start()
