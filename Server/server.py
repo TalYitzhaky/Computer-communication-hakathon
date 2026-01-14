@@ -7,14 +7,13 @@ from game import BlackjackRound
 
 class Server:
     UDP_PORT = 13117
-    BROADCAST_INTERVAL = 1  # seconds
+    BROADCAST_INTERVAL = 1
 
     def __init__(self, server_name: str, tcp_port: int):
         self.server_name = server_name
         self.tcp_port = tcp_port
         self.running = True
 
-    # UDP broadcast thread
     def start_udp_broadcast(self):
         def broadcast_loop():
             sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -32,7 +31,6 @@ class Server:
 
         threading.Thread(target=broadcast_loop, daemon=True).start()
 
-    # TCP server
     def start_tcp_server(self):
         ip = socket.gethostbyname(socket.gethostname())
 
@@ -40,12 +38,12 @@ class Server:
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         sock.bind(('', self.tcp_port))
         sock.listen()
-        sock.settimeout(1)  # to allow periodic checks for self.running
+        sock.settimeout(1)
         print(f"Server started, listening on IP address {ip} and port {self.tcp_port}")
 
         while self.running:
             try:
-                client_sock, addr = sock.accept()  # will timeout every 1 second
+                client_sock, addr = sock.accept()
                 print(f"Client connected from {addr}")
 
                 threading.Thread(
@@ -54,13 +52,12 @@ class Server:
                     daemon=True
                 ).start()
             except socket.timeout:
-                continue  # check self.running again
+                continue
 
-    # Handle one client
     def handle_client(self, sock: socket.socket):
         client_name = "Unknown"
         try:
-            sock.settimeout(None) # Wait forever for human input
+            sock.settimeout(None)
             data = sock.recv(Protocol.REQUEST_SIZE)
             if not data: return
             
@@ -72,12 +69,8 @@ class Server:
 
             for _ in range(num_rounds):
                 self.play_round(sock)
-                # Brief pause between rounds to let the TCP buffer clear
                 time.sleep(0.1)
 
-            # --- THE FIX ---
-            # Give the client a full second to receive and print the final 
-            # Round 5 result before we destroy the socket object.
             print(f"Finished rounds for {client_name}. Cleaning up...")
             time.sleep(1.5) 
 
@@ -87,20 +80,17 @@ class Server:
             print(f"Error handling {client_name}: {e}")
         finally:
             try:
-                # Tell the client we are done sending, but stay open for a moment
                 sock.shutdown(socket.SHUT_RDWR)
             except:
                 pass
             sock.close()
             print(f"Socket for {client_name} closed safely.")
 
-    # Play one round
     def play_round(self, sock: socket.socket):
         sock.settimeout(None)
         game = BlackjackRound()
         game.initial_deal()
 
-        # 1. Initial 3 cards
         for c in [
             game.player_hand.cards[0],
             game.player_hand.cards[1],
@@ -115,7 +105,6 @@ class Server:
                 )
             )
 
-        # 2. Player turn
         while not game.finished:
             data = sock.recv(Protocol.PAYLOAD_SIZE)
             if not data:
@@ -136,15 +125,13 @@ class Server:
                     )
                 )
 
-                # Bust OR 21 → stop player turn
                 if game.player_hand.total >= 21:
                     break
 
-            else:  # STAND
+            else: 
                 game.player_stand()
                 break
 
-        # 3. Dealer reveal
         for i in range(1, len(game.dealer_hand.cards)):
             c = game.dealer_hand.cards[i]
             sock.sendall(
@@ -156,7 +143,6 @@ class Server:
                 )
             )
 
-        # 4. Final result (MANDATORY)
         result_code = Protocol.result_to_code(game.result())
         sock.sendall(
             Protocol.build_payload_packet(
@@ -168,7 +154,6 @@ class Server:
         )
 
 
-    # Run server
     def run(self):
         self.start_udp_broadcast()
         self.start_tcp_server()
