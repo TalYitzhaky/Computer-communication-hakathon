@@ -16,26 +16,35 @@ class Server:
 
     def start_udp_broadcast(self):
         def broadcast_loop():
-            # Create UDP socket
             sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-            
-            # Explicitly bind to the real IP to force it out of the WiFi/Ethernet card
+
+            # FIND THE REAL IP
             real_ip = self.get_real_ip()
+            # BIND to the real IP so the OS knows which physical card to use
             try:
-                # We bind to port 0 (let OS choose) on the real IP
-                sock.bind((real_ip, 0))
+                sock.bind((real_ip, 0)) 
             except:
                 pass
 
-            print(f"UDP Broadcast started from {real_ip} to 255.255.255.255:{self.UDP_PORT}")
+            print(f"Broadcasting offers from {real_ip}...")
 
             while self.running:
                 offer = Protocol.build_offer_packet(self.tcp_port, self.server_name)
-                # 255.255.255.255 is the standard global broadcast
-                sock.sendto(offer, ('255.255.255.255', self.UDP_PORT))
+                # If '255.255.255.255' fails, we use the subnet broadcast
+                # If your IP is 192.168.1.15, this targets 192.168.1.255
+                subnet_broadcast = real_ip.rsplit('.', 1)[0] + '.255'
+                
+                try:
+                    sock.sendto(offer, ('255.255.255.255', self.UDP_PORT))
+                    sock.sendto(offer, (subnet_broadcast, self.UDP_PORT))
+                except Exception as e:
+                    print(f"Broadcast error: {e}")
+                
                 time.sleep(self.BROADCAST_INTERVAL)
+
+        threading.Thread(target=broadcast_loop, daemon=True).start()
 
     def start_tcp_server(self):
         ip = self.get_real_ip()
